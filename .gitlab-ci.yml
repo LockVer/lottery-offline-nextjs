@@ -8,119 +8,140 @@ variables:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   DEBIAN_FRONTEND: noninteractive
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
 
 # 缓存配置
 cache:
   key: "$CI_COMMIT_REF_NAME"
   paths:
     - node_modules/
-    - target/
     - .cargo/
 
-# 网络优化版本 - 唯一的构建作业
-build-windows-optimized:
+# Docker 交叉编译 Windows 版本
+build-windows-docker:
   stage: build
-  image: ubuntu:22.04
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
   variables:
-    # 使用阿里云镜像源解决网络问题
+    # 使用阿里云镜像源
     MIRROR_URL: "http://mirrors.aliyun.com"
   before_script:
-    # 配置 APT 镜像源 (使用 HTTP 避免证书问题)
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
+    # 安装基础工具
+    - apk add --no-cache curl wget bash
     
-    # 更新包列表
-    - apt-get update
+    # 检查 Docker 连接
+    - docker info
     
-    # 分步安装基础工具，避免依赖问题
-    - apt-get install -y wget curl ca-certificates
-    - apt-get install -y gnupg lsb-release xz-utils
-    - apt-get install -y build-essential pkg-config libssl-dev
-    
-    # 更新 CA 证书
-    - update-ca-certificates
-    
-    # 安装 Node.js 22.16.0 (使用阿里云镜像)
-    - echo "📦 安装 Node.js 22.16.0..."
-    - wget -T 30 -t 3 -qO /tmp/node.tar.xz https://mirrors.aliyun.com/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz || wget -T 30 -t 3 -qO /tmp/node.tar.xz https://nodejs.org/dist/v22.16.0/node-v22.16.0-linux-x64.tar.xz || (echo "❌ Node.js 下载失败，使用系统包管理器..." && apt-get install -y nodejs npm)
-    - test -f /tmp/node.tar.xz && (tar -xJ -C /opt -f /tmp/node.tar.xz && ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/ && echo "🎉 Node.js 安装完成") || echo "跳过解压，使用系统包"
-    
-    # 验证 Node.js 安装
-    - echo "🔍 验证 Node.js 安装..."
-    - node --version || echo "❌ Node.js 版本检查失败"
-    - npm --version || echo "❌ npm 版本检查失败"
-    
-    # 安装 mingw-w64 用于 Windows 交叉编译
-    - echo "🔧 安装 Windows 交叉编译工具..."
-    - apt-get install -y mingw-w64 || echo "❌ mingw-w64 安装失败，尝试继续..."
-    
-    # 安装 Rust (使用官方安装脚本)
-    - echo "🦀 安装 Rust..."
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-    - source ~/.cargo/env
-    - rustup target add x86_64-pc-windows-gnu || echo "❌ 添加 Windows 目标失败，尝试继续..."
-    
-    # 配置 Cargo 交叉编译
-    - echo "⚙️ 配置 Cargo 交叉编译..."
-    - mkdir -p ~/.cargo
-    - echo '[target.x86_64-pc-windows-gnu]' >> ~/.cargo/config.toml
-    - echo 'linker = "x86_64-w64-mingw32-gcc"' >> ~/.cargo/config.toml
-    - echo 'ar = "x86_64-w64-mingw32-ar"' >> ~/.cargo/config.toml
+    # 构建自定义交叉编译镜像
+    - |
+      cat > Dockerfile.cross << 'EOF'
+      FROM ubuntu:22.04
       
+      # 设置环境变量
+      ENV DEBIAN_FRONTEND=noninteractive
+      ENV RUSTUP_HOME=/usr/local/rustup
+      ENV CARGO_HOME=/usr/local/cargo
+      ENV PATH=/usr/local/cargo/bin:$PATH
+      
+      # 配置阿里云镜像源
+      RUN echo "deb http://mirrors.aliyun.com/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list && \
+          echo "deb http://mirrors.aliyun.com/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+          echo "deb http://mirrors.aliyun.com/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list && \
+          echo "deb http://mirrors.aliyun.com/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
+      
+      # 安装系统依赖
+      RUN apt-get update && apt-get install -y \
+          curl wget build-essential \
+          pkg-config libssl-dev \
+          libgtk-3-dev libayatana-appindicator3-dev \
+          librsvg2-dev libwebkit2gtk-4.0-dev \
+          mingw-w64 gcc-mingw-w64 \
+          xz-utils ca-certificates && \
+          rm -rf /var/lib/apt/lists/*
+      
+      # 安装 Node.js 22.16.0
+      RUN wget -qO /tmp/node.tar.xz https://mirrors.aliyun.com/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz && \
+          tar -xJ -C /opt -f /tmp/node.tar.xz && \
+          ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/ && \
+          rm /tmp/node.tar.xz
+      
+      # 安装 Rust
+      RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
+          rustup target add x86_64-pc-windows-gnu
+      
+      # 配置 Cargo 交叉编译
+      RUN mkdir -p ~/.cargo && \
+          echo '[target.x86_64-pc-windows-gnu]' > ~/.cargo/config.toml && \
+          echo 'linker = "x86_64-w64-mingw32-gcc"' >> ~/.cargo/config.toml && \
+          echo 'ar = "x86_64-w64-mingw32-ar"' >> ~/.cargo/config.toml
+      
+      # 设置工作目录
+      WORKDIR /workspace
+      
+      # 设置 npm 镜像源
+      RUN npm config set registry https://registry.npmmirror.com
+      EOF
+    
+    # 构建交叉编译镜像
+    - echo "🔨 构建交叉编译 Docker 镜像..."
+    - docker build -t tauri-cross-compile -f Dockerfile.cross .
+    
   script:
-    # 显示环境信息
-    - echo "🔍 环境信息检查："
-    - echo "Node.js:" && (node --version || echo "未安装")
-    - echo "npm:" && (npm --version || echo "未安装") 
-    - echo "Rust:" && (rustc --version || echo "未安装")
-    - echo "Cargo:" && (cargo --version || echo "未安装")
+    # 在 Docker 容器中执行交叉编译
+    - echo "🚀 开始 Docker 交叉编译..."
+    - |
+      docker run --rm \
+        -v $(pwd):/workspace \
+        -w /workspace \
+        tauri-cross-compile \
+        bash -c "
+          set -e
+          echo '🔍 环境检查:'
+          node --version
+          npm --version
+          rustc --version
+          cargo --version
+          
+          echo '📦 安装依赖...'
+          npm ci
+          
+          echo '🔨 构建前端...'
+          npm run build
+          
+          echo '🎯 Windows 交叉编译...'
+          cd src-tauri
+          
+          # 设置环境变量，跳过 GTK 依赖检查
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export PKG_CONFIG_PATH=
+          export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+          
+          # 交叉编译
+          cargo build --release --target x86_64-pc-windows-gnu --no-default-features
+          
+          echo '📋 检查编译产物:'
+          ls -la target/x86_64-pc-windows-gnu/release/
+          find target/x86_64-pc-windows-gnu/release/ -name '*.exe' -type f
+          
+          echo '📦 准备发布文件...'
+          mkdir -p ../release-docker/
+          cp target/x86_64-pc-windows-gnu/release/*.exe ../release-docker/ || echo '未找到 exe 文件'
+          
+          echo '✅ Docker 交叉编译完成!'
+        "
     
-    # 安装依赖
-    - echo "📦 安装 Node.js 依赖..."
-    - npm config set registry https://registry.npmmirror.com || echo "设置镜像源失败"
-    - npm ci || npm install || echo "❌ 依赖安装失败"
-    
-    # 构建前端
-    - echo "🔨 构建前端..."
-    - npm run build || echo "❌ 前端构建失败，尝试继续..."
-    
-    # 编译 Rust 部分
-    - echo "🚀 开始 Windows 交叉编译..."
-    - cd src-tauri
-    - source ~/.cargo/env || echo "❌ Cargo 环境加载失败"
-    
-    # 检查 Rust 环境
-    - echo "🔧 检查 Rust 环境..."
-    - rustc --version || echo "❌ Rust 环境有问题"
-    - cargo --version || echo "❌ Cargo 环境有问题"
-    - rustup target list --installed | grep windows || echo "❌ Windows 目标未安装"
-    
-    # 尝试 Windows 交叉编译
-    - echo "🎯 尝试 Windows 交叉编译..."
-    - cargo build --release --target x86_64-pc-windows-gnu && echo "✅ Windows 交叉编译成功！" || (echo "❌ Windows 交叉编译失败，尝试本地编译..." && cargo build --release)
-    
-    # 检查生成的文件
-    - echo "📋 检查编译产物..."
-    - ls -la target/ || echo "❌ target 目录不存在"
-    - find target/ -name "*.exe" 2>/dev/null | head -10 || echo "❌ 未找到 exe 文件"
-    - find target/ -name "*lottery*" 2>/dev/null | head -10 || echo "❌ 未找到项目相关文件"
-    
-    # 创建产物目录 
-    - echo "📦 整理编译产物..."
-    - mkdir -p ../release-optimized/
-    - ls target/x86_64-pc-windows-gnu/release/*.exe 1> /dev/null 2>&1 && cp target/x86_64-pc-windows-gnu/release/*.exe ../release-optimized/ && echo "✅ 复制 Windows exe 文件成功" || echo "❌ 未找到 Windows exe 文件"
-    - ls target/release/*lottery* 1> /dev/null 2>&1 && cp target/release/*lottery* ../release-optimized/ && echo "✅ 复制本地编译文件成功" || echo "❌ 未找到本地编译文件"
-    - echo "📋 最终产物列表：" && (ls -la ../release-optimized/ || echo "❌ 产物目录为空")
-    - echo "🎉 编译流程完成！"
+    # 检查最终产物
+    - echo "📋 最终产物检查:"
+    - ls -la release-docker/ || echo "产物目录不存在"
     
   artifacts:
-    name: "windows-optimized-$CI_COMMIT_SHORT_SHA"
+    name: "windows-docker-$CI_COMMIT_SHORT_SHA"
     paths:
-      - release-optimized/
+      - release-docker/
     expire_in: 30 days
-    when: always  # 即使部分失败也保存产物
+    when: always
     
   only:
     - main
@@ -132,4 +153,63 @@ build-windows-optimized:
     - linux
     
   # 允许失败，方便调试
-  allow_failure: true 
+  allow_failure: true
+
+# 备选方案：简单 Linux 构建（用于测试）
+build-linux-fallback:
+  stage: build
+  image: ubuntu:22.04
+  variables:
+    MIRROR_URL: "http://mirrors.aliyun.com"
+  before_script:
+    # 配置镜像源
+    - echo "deb ${MIRROR_URL}/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list
+    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list
+    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list
+    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
+    
+    # 安装依赖
+    - apt-get update
+    - apt-get install -y wget curl ca-certificates
+    - apt-get install -y build-essential pkg-config libssl-dev
+    - apt-get install -y libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.0-dev
+    
+    # 安装 Node.js
+    - wget -qO /tmp/node.tar.xz https://mirrors.aliyun.com/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz
+    - tar -xJ -C /opt -f /tmp/node.tar.xz && ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/
+    
+    # 安装 Rust
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    - source ~/.cargo/env
+    
+  script:
+    # Linux 本地构建
+    - echo "🔨 Linux 本地构建（备选方案）..."
+    - npm config set registry https://registry.npmmirror.com
+    - npm ci
+    - npm run build
+    
+    # 构建 Linux 版本
+    - cd src-tauri
+    - source ~/.cargo/env
+    - cargo build --release
+    
+    # 整理产物
+    - mkdir -p ../release-linux/
+    - cp target/release/* ../release-linux/ 2>/dev/null || echo "复制产物"
+    - echo "✅ Linux 构建完成"
+    
+  artifacts:
+    name: "linux-fallback-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - release-linux/
+    expire_in: 7 days
+    when: always
+    
+  only:
+    - develop  # 仅在开发分支运行备选方案
+    
+  tags:
+    - linux
+    
+  when: manual  # 手动触发 
