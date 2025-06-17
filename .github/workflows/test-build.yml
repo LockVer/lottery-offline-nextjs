@@ -1,0 +1,65 @@
+name: 测试构建
+
+on:
+  workflow_dispatch: # 允许手动触发
+  push:
+    branches: [ "develop", "test" ]
+
+jobs:
+  test-build:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: 安装 Rust 稳定版
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 Linux 依赖
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.0-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: 缓存依赖
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: 安装前端依赖
+        run: npm install
+
+      - name: 构建前端
+        run: npm run build
+
+      - name: 测试 Tauri 构建
+        run: npm run tauri build
+
+      - name: 上传构建产物 (仅测试)
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-build-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/
+          retention-days: 3 # 测试版本只保留3天 

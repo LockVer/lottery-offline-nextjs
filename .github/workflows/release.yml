@@ -1,0 +1,157 @@
+name: 发布构建
+
+on:
+  push:
+    tags:
+      - 'v*' # 当推送以 v 开头的标签时触发
+  workflow_dispatch: # 允许手动触发
+    inputs:
+      version:
+        description: '版本号 (如: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-binaries:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows 构建
+          - platform: 'windows-latest'
+            args: ''
+            target: 'x86_64-pc-windows-msvc'
+            artifact_name: 'windows-x64'
+            
+          # macOS 构建 (Intel)
+          - platform: 'macos-latest'
+            args: '--target x86_64-apple-darwin'
+            target: 'x86_64-apple-darwin'
+            artifact_name: 'macos-intel'
+            
+          # macOS 构建 (Apple Silicon)
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            target: 'aarch64-apple-darwin'
+            artifact_name: 'macos-silicon'
+            
+          # Linux 构建
+          - platform: 'ubuntu-20.04'
+            args: ''
+            target: 'x86_64-unknown-linux-gnu'
+            artifact_name: 'linux-x64'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 安装 Linux 依赖 (仅 Ubuntu)
+        if: matrix.platform == 'ubuntu-20.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.0-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev
+
+      - name: Rust 缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ matrix.target }}
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建前端应用
+        run: npm run build
+
+      - name: 构建 Tauri 应用
+        run: npm run tauri build ${{ matrix.args }}
+
+      - name: 查找构建产物
+        shell: bash
+        run: |
+          find src-tauri/target -name "*.msi" -o -name "*.exe" -o -name "*.dmg" -o -name "*.app" -o -name "*.deb" -o -name "*.AppImage" | head -20
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            src-tauri/target/*/release/bundle/
+            src-tauri/target/release/bundle/
+          if-no-files-found: error
+
+  create-release:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载所有构建产物
+        uses: actions/download-artifact@v3
+
+      - name: 准备发布文件
+        run: |
+          mkdir -p release-files
+          
+          # 移动和重命名文件
+          find . -name "*.msi" -exec cp {} release-files/ \;
+          find . -name "*.exe" -exec cp {} release-files/ \;
+          find . -name "*.dmg" -exec cp {} release-files/ \;
+          find . -name "*.deb" -exec cp {} release-files/ \;
+          find . -name "*.AppImage" -exec cp {} release-files/ \;
+          
+          # 显示所有找到的文件
+          ls -la release-files/
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: Release ${{ github.event.inputs.version || github.ref_name }}
+          body: |
+            ## 🎉 新版本发布
+            
+            ### 📦 下载链接
+            - **Windows**: `.msi` 或 `.exe` 文件
+            - **macOS**: `.dmg` 文件 (Intel 和 Apple Silicon 版本)
+            - **Linux**: `.deb` 或 `.AppImage` 文件
+            
+            ### 🔄 更新内容
+            请查看 [提交历史](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}) 了解详细更改。
+            
+            ---
+            *自动生成于 ${{ github.run_number }} 次构建*
+          files: release-files/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
