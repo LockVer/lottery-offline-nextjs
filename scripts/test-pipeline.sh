@@ -31,7 +31,12 @@ git commit -m "$COMMIT_MSG" || echo "没有新的更改需要提交"
 
 # 推送到远程仓库
 echo -e "${YELLOW}📤 推送到 GitLab...${NC}"
-git push origin main
+
+# 检查远程仓库名称
+REMOTE_NAME=$(git remote | head -n 1)
+echo "使用远程仓库: $REMOTE_NAME"
+
+git push $REMOTE_NAME main
 
 echo ""
 echo -e "${GREEN}✅ 代码已推送！${NC}"

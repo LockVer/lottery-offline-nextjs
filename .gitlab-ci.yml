@@ -8,8 +8,6 @@ variables:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
   DEBIAN_FRONTEND: noninteractive
-  DOCKER_HOST: tcp://docker:2375
-  DOCKER_TLS_CERTDIR: ""
 
 # 缓存配置
 cache:
@@ -27,11 +25,19 @@ build-windows-docker:
   variables:
     # 使用阿里云镜像源
     MIRROR_URL: "http://mirrors.aliyun.com"
+    # Docker 配置
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: 1
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
   before_script:
     # 安装基础工具
     - apk add --no-cache curl wget bash
     
-    # 检查 Docker 连接
+    # 等待 Docker 服务启动
+    - echo "⏳ 等待 Docker 服务启动..."
+    - until docker info >/dev/null 2>&1; do echo "等待 Docker..."; sleep 2; done
+    - echo "✅ Docker 服务已就绪"
     - docker info
     
     # 构建自定义交叉编译镜像
