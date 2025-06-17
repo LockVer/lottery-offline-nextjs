@@ -245,13 +245,88 @@ export default function RedeemPage() {
     inputRef.current?.focus();
   }, []);
 
+  /**
+   * 清空输入框并重新聚焦
+   */
   const clear = () => {
     setCode("");
     inputRef.current?.focus();
   };
 
+  /**
+   * 判断字符串是否为ASCII码格式并转换为UTF-8字符
+   * @param input 输入的字符串
+   * @returns 转换后的字符串
+   */
+  const convertAsciiToUtf8 = (input: string): string => {
+    // 移除空格并检查是否为纯数字
+    const trimmedInput = input.trim();
+    
+    // 检查是否为连续的数字（可能是ASCII码）
+    if (/^\d+$/.test(trimmedInput)) {
+      try {
+        // 如果是2-3位数字，可能是单个ASCII码
+        if (trimmedInput.length >= 2 && trimmedInput.length <= 3) {
+          const asciiCode = parseInt(trimmedInput, 10);
+          if (asciiCode >= 32 && asciiCode <= 126) { // 可打印ASCII字符范围
+            const convertedChar = String.fromCharCode(asciiCode);
+            console.log(`ASCII码转换: ${asciiCode} -> ${convertedChar}`);
+            return convertedChar;
+          }
+        }
+        
+        // 如果是更长的数字串，尝试按每2-3位分割并转换
+        const chars: string[] = [];
+        let i = 0;
+        while (i < trimmedInput.length) {
+          // 优先尝试3位数字
+          if (i + 3 <= trimmedInput.length) {
+            const threeDigit = trimmedInput.substring(i, i + 3);
+            const code = parseInt(threeDigit, 10);
+            if (code >= 100 && code <= 126) {
+              chars.push(String.fromCharCode(code));
+              i += 3;
+              continue;
+            }
+          }
+          
+          // 然后尝试2位数字
+          if (i + 2 <= trimmedInput.length) {
+            const twoDigit = trimmedInput.substring(i, i + 2);
+            const code = parseInt(twoDigit, 10);
+            if (code >= 32 && code <= 99) {
+              chars.push(String.fromCharCode(code));
+              i += 2;
+              continue;
+            }
+          }
+          
+          // 如果都不匹配，跳过当前字符
+          i++;
+        }
+        
+        if (chars.length > 0) {
+          const convertedString = chars.join('');
+          console.log(`ASCII码序列转换: ${trimmedInput} -> ${convertedString}`);
+          return convertedString;
+        }
+      } catch (error) {
+        console.error('ASCII码转换失败:', error);
+      }
+    }
+    
+    // 如果不是ASCII码格式或转换失败，返回原始输入
+    return input;
+  };
+
+  /**
+   * 执行兑奖操作
+   */
   const redeem = async () => {
-    redeemTicket.mutate(code, {
+    // 检查并转换ASCII码
+    const processedCode = convertAsciiToUtf8(code);
+    console.log("processedCode", processedCode);
+    redeemTicket.mutate(processedCode, {
       onSuccess: (prize: string | null) => {
         clear();
         toast.success("兑换成功");

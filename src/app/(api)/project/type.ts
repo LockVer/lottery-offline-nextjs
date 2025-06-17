@@ -23,5 +23,3 @@ export const GetProjectTotalRequestSchema = z.object({
 });
 
 export type GetProjectTotalRequest = z.infer<typeof GetProjectTotalRequestSchema>;
-}
-  

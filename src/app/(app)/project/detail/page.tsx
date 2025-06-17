@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useDatabase } from "@/lib/database/database-provider";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -13,7 +13,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default function ProjectDetailPage() {
+/**
+ * 项目详情内容组件 - 包含useSearchParams的实际内容
+ */
+function ProjectDetailContent() {
   const { t } = useTranslation();
   const { db } = useDatabase();
   const searchParams = useSearchParams();
@@ -84,5 +87,20 @@ export default function ProjectDetailPage() {
       </section>
       <section>{/* 兑奖统计 */}</section>
     </div>
+  );
+}
+
+/**
+ * 项目详情页面 - 使用Suspense包装useSearchParams组件
+ */
+export default function ProjectDetailPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center p-8">
+        <div className="text-muted-foreground">加载中...</div>
+      </div>
+    }>
+      <ProjectDetailContent />
+    </Suspense>
   );
 }
