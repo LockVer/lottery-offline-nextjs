@@ -219,3 +219,225 @@ build-linux-fallback:
     - linux
     
   when: manual  # 手动触发 
+
+# GitLab CI/CD 配置 - Windows Docker 原生编译
+
+stages:
+  - build
+
+variables:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+# 缓存配置
+cache:
+  key: "$CI_COMMIT_REF_NAME"
+  paths:
+    - node_modules/
+    - .cargo/
+
+# Windows Docker 原生编译
+build-windows-native:
+  stage: build
+  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  variables:
+    # PowerShell 执行策略
+    POWERSHELL_TELEMETRY_OPTOUT: 1
+  before_script:
+    # 安装 Chocolatey 包管理器
+    - |
+      Set-ExecutionPolicy Bypass -Scope Process -Force
+      [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+      iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    
+    # 安装 Node.js
+    - choco install nodejs --version=22.16.0 -y
+    - refreshenv
+    
+    # 安装 Rust
+    - |
+      Invoke-WebRequest -Uri "https://win.rustup.rs/" -OutFile "rustup-init.exe" -UseBasicParsing
+      .\rustup-init.exe -y --default-toolchain stable
+      Remove-Item .\rustup-init.exe
+    
+    # 刷新环境变量
+    - $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+    
+    # 验证安装
+    - node --version
+    - npm --version
+    - cargo --version
+    
+  script:
+    # 安装依赖
+    - echo "📦 安装 Node.js 依赖..."
+    - npm ci
+    
+    # 构建前端
+    - echo "🔨 构建前端..."
+    - npm run build
+    
+    # 编译 Windows 版本
+    - echo "🚀 开始 Windows 原生编译..."
+    - cd src-tauri
+    - cargo build --release
+    
+    # 检查编译产物
+    - echo "📋 检查编译产物..."
+    - Get-ChildItem -Path "target\release\" -Name "*.exe"
+    
+    # 整理产物
+    - echo "📦 整理编译产物..."
+    - New-Item -ItemType Directory -Path "..\release-windows-native" -Force
+    - Copy-Item "target\release\*.exe" "..\release-windows-native\" -ErrorAction SilentlyContinue
+    - Get-ChildItem "..\release-windows-native\"
+    - echo "✅ Windows 原生编译完成！"
+    
+  artifacts:
+    name: "windows-native-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - release-windows-native/
+    expire_in: 30 days
+    when: always
+    
+  only:
+    - main
+    - develop
+    - merge_requests
+    - tags
+    
+  tags:
+    - windows  # 需要 Windows Runner
+    
+  # 允许失败，方便调试
+  allow_failure: true
+
+# 备选方案：使用 Windows Server Core 2019
+build-windows-2019:
+  stage: build
+  image: mcr.microsoft.com/windows/servercore:ltsc2019
+  variables:
+    POWERSHELL_TELEMETRY_OPTOUT: 1
+  before_script:
+    # 使用更兼容的安装方式
+    - |
+      # 安装 Chocolatey
+      Set-ExecutionPolicy Bypass -Scope Process -Force
+      [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+      iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+    
+    # 安装工具
+    - choco install nodejs --version=22.16.0 -y --force
+    - choco install git -y
+    - refreshenv
+    
+    # 安装 Rust (使用官方安装器)
+    - |
+      $rustupUrl = "https://win.rustup.rs/x86_64"
+      Invoke-WebRequest -Uri $rustupUrl -OutFile "rustup-init.exe"
+      Start-Process -FilePath ".\rustup-init.exe" -ArgumentList "-y" -Wait
+      Remove-Item ".\rustup-init.exe"
+    
+    # 添加 Cargo 到 PATH
+    - $env:PATH += ";$env:USERPROFILE\.cargo\bin"
+    
+  script:
+    # 环境检查
+    - echo "🔍 环境检查："
+    - node --version
+    - npm --version
+    - cargo --version
+    
+    # 构建项目
+    - echo "📦 安装依赖..."
+    - npm install
+    
+    - echo "🔨 构建前端..."
+    - npm run build
+    
+    - echo "🚀 编译 Tauri 应用..."
+    - cd src-tauri
+    - cargo build --release
+    
+    # 整理文件
+    - echo "📦 准备发布文件..."
+    - mkdir ..\release-2019 -ErrorAction SilentlyContinue
+    - copy target\release\*.exe ..\release-2019\ -ErrorAction SilentlyContinue
+    - dir ..\release-2019\
+    
+  artifacts:
+    name: "windows-2019-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - release-2019/
+    expire_in: 30 days
+    when: always
+    
+  only:
+    - develop  # 仅在开发分支测试
+    
+  tags:
+    - windows
+    
+  when: manual  # 手动触发
+
+# Linux 交叉编译备选方案（如果没有 Windows Runner）
+build-linux-cross:
+  stage: build
+  image: ubuntu:22.04
+  variables:
+    MIRROR_URL: "http://mirrors.aliyun.com"
+  before_script:
+    # 配置镜像源
+    - echo "deb ${MIRROR_URL}/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list
+    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list
+    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list
+    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
+    
+    # 安装依赖 - 只安装编译必需的，跳过 GTK
+    - apt-get update
+    - apt-get install -y wget curl ca-certificates build-essential pkg-config libssl-dev mingw-w64 xz-utils
+    
+    # 安装 Node.js
+    - wget -qO /tmp/node.tar.xz https://mirrors.aliyun.com/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz
+    - tar -xJ -C /opt -f /tmp/node.tar.xz && ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/
+    
+    # 安装 Rust
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    - source ~/.cargo/env
+    - rustup target add x86_64-pc-windows-gnu
+    
+    # 配置交叉编译
+    - mkdir -p ~/.cargo
+    - echo '[target.x86_64-pc-windows-gnu]' > ~/.cargo/config.toml
+    - echo 'linker = "x86_64-w64-mingw32-gcc"' >> ~/.cargo/config.toml
+    
+  script:
+    - echo "⚠️  注意：这是备选的 Linux 交叉编译方案"
+    - npm config set registry https://registry.npmmirror.com
+    - npm ci
+    - npm run build
+    
+    # 尝试无 GUI 编译
+    - cd src-tauri
+    - source ~/.cargo/env
+    - echo "🎯 尝试无默认特性编译..."
+    - cargo build --release --target x86_64-pc-windows-gnu --no-default-features || echo "交叉编译失败"
+    
+    # 整理产物
+    - mkdir -p ../release-cross-backup/
+    - find target/ -name "*.exe" -exec cp {} ../release-cross-backup/ \; || echo "未找到 exe 文件"
+    
+  artifacts:
+    name: "linux-cross-backup-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - release-cross-backup/
+    expire_in: 7 days
+    when: always
+    
+  only:
+    - develop
+    
+  tags:
+    - linux
+    
+  when: manual  # 仅作为备选方案 
