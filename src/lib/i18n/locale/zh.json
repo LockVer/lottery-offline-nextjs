@@ -1,0 +1,83 @@
+{
+  "meta": {
+    "softwareName": "彩易通"
+  },
+  "common": {
+    "loading": "加载中...",
+    "error": "出错了"
+  },
+  "sidebar": {
+    "dashboard": "统计",
+    "project": "项目",
+    "redeem": "兑奖"
+  },
+  "page": {
+    "activate": {
+      "titleRequestActive": "激活软件",
+      "descriptionRequestActive": "将机器码发送给销售人员获取激活码",
+      "machineCode": "机器码",
+      "licenseCode": "激活码",
+      "licenseCodePlaceholder": "请输入激活码",
+      "copyMachineCode": "复制",
+      "submit": "激活",
+      "submitLoading": "激活中...",
+      "machineCodeLoading": "获取机器码中...",
+      "copyMachineCodeSuccess": "复制成功",
+      "activateSuccess": "激活成功",
+      "activateFailed": "激活失败"
+    },
+    "project": {
+      "title": "项目",
+      "importCsv": "导入项目",
+      "loading": "加载中...",
+      "loadFailed": "加载失败",
+      "noProjects": "没有项目，请联系销售人员获取项目数据文件。",
+      "noProjectsImportCsv": "导入你的第一个项目",
+      "rename": "重命名",
+      "delete": "删除",
+      "created_at": "创建时间",
+      "updated_at": "更新时间",
+      "actions": "操作",
+      "noResults": "没有结果",
+      "previous": "上一页",
+      "next": "下一页",
+      "filterPlaceholder": "筛选项目名称...",
+      "columns": "列筛选",
+      "name": "项目名称",
+      "exportExemptions": "导出记录",
+      "redeemed_progress_bar": "已兑奖进度",
+      "redeemed_tickets": "已兑奖",
+      "total_tickets": "总数",
+      "detail": {
+        "error": "出错了",
+        "notFound": "找不到项目",
+        "backToList": "返回项目列表",
+        "info": "项目信息",
+        "basicInfo": "基本信息和统计数据",
+        "created": "创建时间",
+        "updated": "更新时间",
+        "description": "描述",
+        "tickets": "张票券",
+        "prizeDistribution": "奖项分布",
+        "prizeStats": "各奖项数量统计",
+        "statsError": "无法加载统计数据",
+        "noStats": "暂无统计数据",
+        "prizeLevel": "奖项",
+        "count": "数量",
+        "percentage": "百分比",
+        "noPrize": "未中奖",
+        "level": "等奖"      
+      }
+    },
+    "redeem": {
+      "placeholder": "扫码或输入兑奖码",
+      "redeem": "兑奖",
+      "clear": "清除",
+      "waiting": "等待兑奖...",
+      "notWinning": "未中奖。",
+      "winning": "中奖了，奖项为： {{prize}}。",
+      "securityCode": "安全码",
+      "manualCode": "手动码"
+    }
+  }
+}

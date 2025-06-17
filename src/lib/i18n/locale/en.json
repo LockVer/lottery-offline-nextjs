@@ -1,0 +1,83 @@
+{
+  "meta": {
+    "softwareName": "EZLottery-Offline"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "An error occurred"
+  },
+  "sidebar": {
+    "dashboard": "Dashboard",
+    "project": "Projects",
+    "redeem": "Redeem"
+  },
+  "page": {
+    "activate": {
+      "titleRequestActive": "Activate Software",
+      "descriptionRequestActive": "Send the machine code to sales representative to get activation code",
+      "machineCode": "Machine Code",
+      "licenseCode": "License Code",
+      "licenseCodePlaceholder": "Please enter license code",
+      "copyMachineCode": "Copy",
+      "submit": "Activate",
+      "submitLoading": "Activating...",
+      "machineCodeLoading": "Getting machine code...",
+      "copyMachineCodeSuccess": "Copied successfully",
+      "activateSuccess": "Activation successful",
+      "activateFailed": "Activation failed"
+    },
+    "project": {
+      "title": "Projects",
+      "importCsv": "Import Project",
+      "loading": "Loading...",
+      "loadFailed": "Failed to load",
+      "noProjects": "No projects available. Please contact sales representative for project data files.",
+      "noProjectsImportCsv": "Import your first project",
+      "rename": "Rename",
+      "delete": "Delete",
+      "created_at": "Created At",
+      "updated_at": "Updated At",
+      "actions": "Actions",
+      "noResults": "No results",
+      "previous": "Previous",
+      "next": "Next",
+      "filterPlaceholder": "Filter project names...",
+      "columns": "Columns",
+      "name": "Project Name",
+      "exportExemptions": "Export Records",
+      "redeemed_progress_bar": "Redemption Progress",
+      "redeemed_tickets": "Redeemed",
+      "total_tickets": "Total",
+      "detail": {
+        "error": "Error",
+        "notFound": "Project not found",
+        "backToList": "Back to project list",
+        "info": "Project Information",
+        "basicInfo": "Basic Information and Statistics",
+        "created": "Created",
+        "updated": "Updated",
+        "description": "Description",
+        "tickets": "tickets",
+        "prizeDistribution": "Prize Distribution",
+        "prizeStats": "Prize Statistics",
+        "statsError": "Unable to load statistics",
+        "noStats": "No statistics available",
+        "prizeLevel": "Prize Level",
+        "count": "Count",
+        "percentage": "Percentage",
+        "noPrize": "No Prize",
+        "level": "Prize"      
+      }
+    },
+    "redeem": {
+      "placeholder": "Scan or Enter code",
+      "redeem": "Redeem",
+      "clear": "Clear",
+      "waiting": "Waiting for redemption...",
+      "notWinning": "Not a winning ticket.",
+      "winning": "Congratulations! You won: {{prize}}.",
+      "securityCode": "Security Code",
+      "manualCode": "Manual Code"
+    }
+  }
+}
