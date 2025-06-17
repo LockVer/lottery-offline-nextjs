@@ -22,28 +22,30 @@ build-windows-optimized:
   stage: build
   image: ubuntu:22.04
   variables:
-    # 使用清华大学镜像源解决网络问题
-    MIRROR_URL: "https://mirrors.tuna.tsinghua.edu.cn"
+    # 使用阿里云镜像源解决网络问题
+    MIRROR_URL: "http://mirrors.aliyun.com"
   before_script:
-    # 配置 APT 镜像源
+    # 配置 APT 镜像源 (使用 HTTP 避免证书问题)
     - echo "deb ${MIRROR_URL}/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list
     - echo "deb ${MIRROR_URL}/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list
     - echo "deb ${MIRROR_URL}/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list
     - echo "deb ${MIRROR_URL}/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
     
     # 更新包列表
-    - apt-get update || echo "📍 更新失败，尝试继续..."
+    - apt-get update
     
-    # 安装基础工具
-    - apt-get install -y wget curl ca-certificates gnupg lsb-release build-essential pkg-config libssl-dev xz-utils || true
+    # 分步安装基础工具，避免依赖问题
+    - apt-get install -y wget curl ca-certificates
+    - apt-get install -y gnupg lsb-release xz-utils
+    - apt-get install -y build-essential pkg-config libssl-dev
     
     # 更新 CA 证书
-    - update-ca-certificates || true
+    - update-ca-certificates
     
-    # 安装 Node.js 22.16.0 (简化版本)
+    # 安装 Node.js 22.16.0 (使用阿里云镜像)
     - echo "📦 安装 Node.js 22.16.0..."
-    - wget -T 30 -t 3 -qO /tmp/node.tar.xz https://nodejs.org/dist/v22.16.0/node-v22.16.0-linux-x64.tar.xz || wget -T 30 -t 3 -qO /tmp/node.tar.xz https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz || curl -fsSL -o /tmp/node.tar.xz https://nodejs.org/dist/v22.16.0/node-v22.16.0-linux-x64.tar.xz
-    - tar -xJ -C /opt -f /tmp/node.tar.xz && ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/ && echo "🎉 Node.js 安装完成" || (echo "❌ Node.js 下载失败，使用系统包管理器..." && apt-get install -y nodejs npm)
+    - wget -T 30 -t 3 -qO /tmp/node.tar.xz https://mirrors.aliyun.com/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz || wget -T 30 -t 3 -qO /tmp/node.tar.xz https://nodejs.org/dist/v22.16.0/node-v22.16.0-linux-x64.tar.xz || (echo "❌ Node.js 下载失败，使用系统包管理器..." && apt-get install -y nodejs npm)
+    - test -f /tmp/node.tar.xz && (tar -xJ -C /opt -f /tmp/node.tar.xz && ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/ && echo "🎉 Node.js 安装完成") || echo "跳过解压，使用系统包"
     
     # 验证 Node.js 安装
     - echo "🔍 验证 Node.js 安装..."
