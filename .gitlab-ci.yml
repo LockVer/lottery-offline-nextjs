@@ -43,20 +43,33 @@ build-windows-docker:
     DOCKER_TLS_VERIFY: 1
     DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
   before_script:
+    # 配置国内镜像源以解决网络问题
+    - |
+      cat > /etc/apt/sources.list << EOF
+      deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal main restricted universe multiverse
+      deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-updates main restricted universe multiverse
+      deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-backports main restricted universe multiverse
+      deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-security main restricted universe multiverse
+      EOF
+    
     # 安装必要工具
     - apt-get update
     - apt-get install -y curl build-essential pkg-config libssl-dev
     
-    # 安装 Docker CLI
-    - curl -fsSL https://get.docker.com -o get-docker.sh
-    - sh get-docker.sh
+    # 安装 Docker CLI (使用国内镜像)
+    - curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu/gpg | apt-key add -
+    - echo "deb [arch=amd64] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu focal stable" > /etc/apt/sources.list.d/docker.list
+    - apt-get update
+    - apt-get install -y docker-ce-cli
     
-    # 安装 Node.js
-    - curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+    # 安装 Node.js (使用国内镜像)
+    - curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/nodesource/deb_18.x/setup_18.x | bash -
     - apt-get install -y nodejs
     
-    # 安装 Rust 和 Windows 目标
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    # 安装 Rust 和 Windows 目标 (使用国内镜像)
+    - export RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup
+    - export RUSTUP_UPDATE_ROOT=https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup
+    - curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y
     - source ~/.cargo/env
     - rustup target add x86_64-pc-windows-gnu
     
@@ -115,6 +128,17 @@ build-windows-advanced:
   stage: build
   image: ghcr.io/cross-rs/cross:x86_64-pc-windows-gnu
   before_script:
+    # 配置镜像源
+    - |
+      if [ -f /etc/apt/sources.list ]; then
+        cat > /etc/apt/sources.list << EOF
+        deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal main restricted universe multiverse
+        deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-updates main restricted universe multiverse
+        deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-backports main restricted universe multiverse
+        deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ focal-security main restricted universe multiverse
+        EOF
+      fi
+    - apt-get update || true
     # 安装 Node.js
     - curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
     - apt-get install -y nodejs
@@ -151,6 +175,14 @@ build-windows-simple:
   stage: build
   image: rust:1.70
   before_script:
+    # 配置镜像源解决网络问题
+    - |
+      cat > /etc/apt/sources.list << EOF
+      deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bullseye main
+      deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bullseye-updates main
+      deb https://mirrors.tuna.tsinghua.edu.cn/debian-security/ bullseye-security main
+      EOF
+    
     # 安装交叉编译工具
     - apt-get update
     - apt-get install -y mingw-w64 nodejs npm
@@ -183,6 +215,75 @@ build-windows-simple:
     
   only:
     - develop    # 开发分支使用简单方案测试
+    
+  tags:
+    - linux
+
+# 网络优化版本 - 使用预装环境
+build-windows-optimized:
+  stage: build
+  image: ubuntu:22.04  # 使用更新的版本
+  before_script:
+    # 使用阿里云镜像源
+    - |
+      cat > /etc/apt/sources.list << EOF
+      deb http://mirrors.aliyun.com/ubuntu/ jammy main restricted universe multiverse
+      deb http://mirrors.aliyun.com/ubuntu/ jammy-updates main restricted universe multiverse
+      deb http://mirrors.aliyun.com/ubuntu/ jammy-backports main restricted universe multiverse
+      deb http://mirrors.aliyun.com/ubuntu/ jammy-security main restricted universe multiverse
+      EOF
+    
+    # 快速安装基础工具
+    - apt-get update
+    - apt-get install -y wget curl build-essential pkg-config libssl-dev
+    
+    # 安装 Node.js (使用二进制包)
+    - wget -qO- https://nodejs.org/dist/v18.19.0/node-v18.19.0-linux-x64.tar.xz | tar -xJ -C /opt
+    - ln -sf /opt/node-v18.19.0-linux-x64/bin/* /usr/local/bin/
+    
+    # 安装 Rust (使用快速安装)
+    - wget -qO- https://forge.rust-lang.org/infra/channel-layout.html
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    - source ~/.cargo/env
+    - rustup target add x86_64-pc-windows-gnu
+    
+    # 安装 Windows 交叉编译工具
+    - apt-get install -y mingw-w64
+    
+    # 配置 Cargo
+    - mkdir -p ~/.cargo
+    - |
+      cat >> ~/.cargo/config.toml << EOF
+      [target.x86_64-pc-windows-gnu]
+      linker = "x86_64-w64-mingw32-gcc"
+      ar = "x86_64-w64-mingw32-ar"
+      EOF
+  
+  script:
+    # 构建前端
+    - echo "🔨 构建前端..."
+    - npm ci
+    - npm run build
+    
+    # 交叉编译 Windows 版本
+    - echo "🚀 开始 Windows 交叉编译..."
+    - cd src-tauri
+    - source ~/.cargo/env
+    - cargo build --release --target x86_64-pc-windows-gnu
+    
+    # 整理产物
+    - mkdir -p ../release-optimized/
+    - cp target/x86_64-pc-windows-gnu/release/*.exe ../release-optimized/ || true
+    - echo "✅ 优化版 Windows 编译完成"
+    
+  artifacts:
+    name: "windows-optimized-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - release-optimized/
+    expire_in: 30 days
+    
+  only:
+    - main
     
   tags:
     - linux
