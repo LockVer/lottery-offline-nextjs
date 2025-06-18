@@ -1,5 +1,5 @@
-# GitLab CI/CD 配置 - Windows 原生编译
-# 适用于全新的 Windows 系统，自动安装所有必要工具
+# GitLab CI/CD Configuration - Windows Native Build
+# Suitable for clean Windows systems with automatic tool installation
 
 stages:
   - build
@@ -7,12 +7,12 @@ stages:
 variables:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  # PowerShell 执行策略
+  # PowerShell execution policy
   POWERSHELL_TELEMETRY_OPTOUT: 1
-  # 跳过自动 Git 克隆（因为 Git 可能未安装）
+  # Skip automatic Git clone (Git may not be installed)
   GIT_STRATEGY: none
 
-# 缓存配置
+# Cache configuration
 cache:
   key: "$CI_COMMIT_REF_NAME"
   paths:
@@ -20,51 +20,47 @@ cache:
     - .cargo/
     - C:\tools\
 
-# Windows 原生编译 - 全新系统自动配置
+# Windows native build - automatic configuration for clean systems
 build-windows-native:
   stage: build
   before_script:
-    # 设置 PowerShell 执行策略
+    # Set PowerShell execution policy
     - Set-ExecutionPolicy Bypass -Scope Process -Force
-    - echo "🚀 开始配置全新 Windows 编译环境..."
+    - Write-Host "Starting Windows build environment setup..."
     
-    # 检查并安装 Chocolatey 包管理器
-    - echo "📦 安装 Chocolatey 包管理器..."
+    # Install Chocolatey package manager
+    - Write-Host "Installing Chocolatey package manager..."
     - |
       if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
-        Write-Host "安装 Chocolatey..."
+        Write-Host "Installing Chocolatey..."
         try {
           [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
           iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
           refreshenv
-          Write-Host "✅ Chocolatey 安装完成"
+          Write-Host "Chocolatey installation completed"
         } catch {
-          Write-Host "❌ Chocolatey 安装失败: $($_.Exception.Message)"
-          Write-Host "尝试备用安装方法..."
-          # 备用方法：下载到本地再执行
+          Write-Host "Chocolatey installation failed, trying alternative method..."
           $chocoScript = "$env:TEMP\install-chocolatey.ps1"
           Invoke-WebRequest -Uri 'https://community.chocolatey.org/install.ps1' -OutFile $chocoScript -UseBasicParsing
           & $chocoScript
           Remove-Item $chocoScript
         }
       } else {
-        Write-Host "✅ Chocolatey 已安装"
+        Write-Host "Chocolatey already installed"
       }
     
-    # 安装 Git（如果没有的话）
-    - echo "🔧 检查并安装 Git..."
+    # Install Git
+    - Write-Host "Checking and installing Git..."
     - |
       if (!(Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Host "安装 Git..."
+        Write-Host "Installing Git..."
         try {
           choco install git -y --no-progress
           refreshenv
-          # 手动添加 Git 到 PATH
           $env:PATH += ";C:\Program Files\Git\bin;C:\Program Files\Git\cmd"
-          Write-Host "✅ Git 安装完成"
+          Write-Host "Git installation completed"
         } catch {
-          Write-Host "❌ Git 安装失败，尝试直接下载..."
-          # 备用方法：直接下载 Git 便携版
+          Write-Host "Git installation failed, trying direct download..."
           $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/PortableGit-2.47.1-64-bit.7z.exe"
           $gitPath = "$env:TEMP\git-portable.exe"
           $gitDir = "C:\tools\git"
@@ -77,47 +73,43 @@ build-windows-native:
           $env:PATH += ";$gitDir\bin;$gitDir\cmd"
         }
       } else {
-        Write-Host "✅ Git 已安装: $(git --version)"
+        Write-Host "Git already installed"
       }
     
-    # 手动克隆代码仓库（因为我们跳过了自动克隆）
-    - echo "📁 手动克隆代码仓库..."
+    # Manual repository clone
+    - Write-Host "Manual repository clone..."
     - |
       $projectPath = $PWD.Path
-      Write-Host "当前工作目录: $projectPath"
+      Write-Host "Current working directory: $projectPath"
       
-      # 检查是否已有代码
       if (Test-Path ".git") {
-        Write-Host "✅ 代码仓库已存在"
+        Write-Host "Repository already exists"
       } else {
-        Write-Host "克隆代码仓库..."
+        Write-Host "Cloning repository..."
         try {
           git clone $env:CI_REPOSITORY_URL .
           git checkout $env:CI_COMMIT_SHA
-          Write-Host "✅ 代码克隆完成"
+          Write-Host "Repository clone completed"
         } catch {
-          Write-Host "❌ Git 克隆失败: $($_.Exception.Message)"
-          Write-Host "尝试使用 HTTP 方式..."
+          Write-Host "Git clone failed, trying HTTP method..."
           $httpUrl = $env:CI_REPOSITORY_URL -replace 'git@([^:]+):', 'https://$1/'
           git clone $httpUrl .
           git checkout $env:CI_COMMIT_SHA
         }
       }
     
-    # 安装 Node.js 22.16.0
-    - echo "📦 安装 Node.js 22.16.0..."
+    # Install Node.js 22.16.0
+    - Write-Host "Installing Node.js 22.16.0..."
     - |
       if (!(Get-Command node -ErrorAction SilentlyContinue)) {
-        Write-Host "安装 Node.js 22.16.0..."
+        Write-Host "Installing Node.js 22.16.0..."
         try {
           choco install nodejs --version=22.16.0 -y --force --no-progress
           refreshenv
-          # 手动添加到 PATH（防止环境变量问题）
           $env:PATH += ";C:\Program Files\nodejs"
-          Write-Host "✅ Node.js 安装完成"
+          Write-Host "Node.js installation completed"
         } catch {
-          Write-Host "❌ Node.js 安装失败，尝试直接下载..."
-          # 备用方法：直接下载 Node.js
+          Write-Host "Node.js installation failed, trying direct download..."
           $nodeUrl = "https://nodejs.org/dist/v22.16.0/node-v22.16.0-win-x64.zip"
           $nodePath = "$env:TEMP\node.zip"
           $nodeDir = "C:\tools\nodejs"
@@ -130,66 +122,59 @@ build-windows-native:
         }
       } else {
         $nodeVersion = node --version
-        Write-Host "✅ Node.js 已安装: $nodeVersion"
+        Write-Host "Node.js already installed: $nodeVersion"
         if ($nodeVersion -notlike "v22.16.*") {
-          Write-Host "升级到 Node.js 22.16.0..."
+          Write-Host "Upgrading to Node.js 22.16.0..."
           choco upgrade nodejs --version=22.16.0 -y --force --no-progress
           refreshenv
         }
       }
     
-    # 安装 Rust
-    - echo "🦀 安装 Rust..."
+    # Install Rust
+    - Write-Host "Installing Rust..."
     - |
       if (!(Get-Command cargo -ErrorAction SilentlyContinue)) {
-        Write-Host "安装 Rust..."
+        Write-Host "Installing Rust..."
         try {
-          # 下载 Rust 安装器
           $rustupUrl = "https://win.rustup.rs/x86_64"
           $rustupPath = "$env:TEMP\rustup-init.exe"
           Invoke-WebRequest -Uri $rustupUrl -OutFile $rustupPath -UseBasicParsing
           
-          # 静默安装 Rust
           Start-Process -FilePath $rustupPath -ArgumentList "-y", "--default-toolchain", "stable" -Wait -NoNewWindow
           Remove-Item $rustupPath
           
-          # 手动添加 Cargo 到 PATH
           $env:PATH += ";$env:USERPROFILE\.cargo\bin"
-          
-          # 刷新环境变量
           $env:CARGO_HOME = "$env:USERPROFILE\.cargo"
           $env:RUSTUP_HOME = "$env:USERPROFILE\.rustup"
-          Write-Host "✅ Rust 安装完成"
+          Write-Host "Rust installation completed"
         } catch {
-          Write-Host "❌ Rust 安装失败: $($_.Exception.Message)"
+          Write-Host "Rust installation failed"
           exit 1
         }
       } else {
-        Write-Host "✅ Rust 已安装: $(cargo --version)"
+        Write-Host "Rust already installed"
       }
     
-    # 安装 Visual Studio Build Tools（改为离线安装方式）
-    - echo "🔧 安装 Visual Studio Build Tools..."
+    # Install Visual Studio Build Tools
+    - Write-Host "Installing Visual Studio Build Tools..."
     - |
       if (!(Get-Command cl -ErrorAction SilentlyContinue)) {
-        Write-Host "安装 Visual Studio Build Tools 2022..."
+        Write-Host "Installing Visual Studio Build Tools 2022..."
         try {
-          # 方法1：使用 Chocolatey
-          Write-Host "尝试使用 Chocolatey 安装..."
+          Write-Host "Trying Chocolatey installation..."
           choco install visualstudio2022buildtools -y --no-progress --timeout=3600
           choco install visualstudio2022-workload-vctools -y --no-progress --timeout=3600
           refreshenv
-          Write-Host "✅ Visual Studio Build Tools 安装完成"
+          Write-Host "Visual Studio Build Tools installation completed"
         } catch {
-          Write-Host "❌ Chocolatey 安装失败，尝试直接下载安装器..."
-          # 方法2：直接下载官方安装器
+          Write-Host "Chocolatey installation failed, trying direct installer..."
           $vsUrl = "https://aka.ms/vs/17/release/vs_buildtools.exe"
           $vsPath = "$env:TEMP\vs_buildtools.exe"
           
-          Write-Host "下载 Visual Studio Build Tools 安装器..."
+          Write-Host "Downloading Visual Studio Build Tools installer..."
           Invoke-WebRequest -Uri $vsUrl -OutFile $vsPath -UseBasicParsing
           
-          Write-Host "安装 Visual Studio Build Tools（离线模式）..."
+          Write-Host "Installing Visual Studio Build Tools (offline mode)..."
           $arguments = @(
             "--quiet"
             "--wait"
@@ -202,101 +187,100 @@ build-windows-native:
           Start-Process -FilePath $vsPath -ArgumentList $arguments -Wait -NoNewWindow
           Remove-Item $vsPath
           
-          # 添加 MSVC 到环境变量
           $vctools = Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\" | Sort-Object Name -Descending | Select-Object -First 1
           if ($vctools) {
             $env:PATH += ";$($vctools.FullName)\bin\Hostx64\x64"
           }
         }
       } else {
-        Write-Host "✅ Visual Studio Build Tools 已安装"
+        Write-Host "Visual Studio Build Tools already installed"
       }
     
-    # 验证所有工具安装
-    - echo "🔍 验证开发环境..."
+    # Verify development environment
+    - Write-Host "Verifying development environment..."
     - |
-      Write-Host "=== 环境检查 ==="
+      Write-Host "=== Environment Check ==="
       $allGood = $true
       
       try {
         $nodeVer = node --version
-        Write-Host "✅ Node.js: $nodeVer"
+        Write-Host "Node.js: $nodeVer"
       } catch {
-        Write-Host "❌ Node.js 未正确安装"
+        Write-Host "Node.js not properly installed"
         $allGood = $false
       }
       
       try {
         $npmVer = npm --version
-        Write-Host "✅ npm: $npmVer"
+        Write-Host "npm: $npmVer"
       } catch {
-        Write-Host "❌ npm 未正确安装"
+        Write-Host "npm not properly installed"
         $allGood = $false
       }
       
       try {
         $cargoVer = cargo --version
-        Write-Host "✅ Cargo: $cargoVer"
+        Write-Host "Cargo: $cargoVer"
       } catch {
-        Write-Host "❌ Rust/Cargo 未正确安装"
+        Write-Host "Rust/Cargo not properly installed"
         $allGood = $false
       }
       
       try {
         $rustcVer = rustc --version
-        Write-Host "✅ Rustc: $rustcVer"
+        Write-Host "Rustc: $rustcVer"
       } catch {
-        Write-Host "❌ Rustc 未正确安装"
+        Write-Host "Rustc not properly installed"
         $allGood = $false
       }
       
       if ($allGood) {
-        Write-Host "🎉 所有工具安装完成！"
+        Write-Host "All tools installation completed!"
       } else {
-        Write-Host "❌ 部分工具安装失败，但继续尝试构建..."
+        Write-Host "Some tools installation failed, but continuing with build..."
       }
     
   script:
-    # 设置 npm 镜像源（提高下载速度）
-    - echo "⚙️ 配置 npm 镜像源..."
+    # Configure npm registry
+    - Write-Host "Configuring npm registry..."
     - npm config set registry https://registry.npmmirror.com
     
-    # 安装项目依赖
-    - echo "📦 安装项目依赖..."
+    # Install project dependencies
+    - Write-Host "Installing project dependencies..."
     - npm ci
     
-    # 构建前端
-    - echo "🔨 构建前端..."
+    # Build frontend
+    - Write-Host "Building frontend..."
     - npm run build
     
-    # 编译 Tauri 应用
-    - echo "🚀 开始编译 Tauri 应用..."
+    # Compile Tauri application
+    - Write-Host "Starting Tauri application compilation..."
     - cd src-tauri
     
-    # 确保 Rust 环境变量正确
+    # Ensure Rust environment variables are correct
     - $env:CARGO_HOME = "$env:USERPROFILE\.cargo"
     - $env:RUSTUP_HOME = "$env:USERPROFILE\.rustup"
     - $env:PATH += ";$env:USERPROFILE\.cargo\bin"
     
-    # 编译 Release 版本
+    # Compile Release version
     - cargo build --release
     
-    # 检查编译产物
-    - echo "📋 检查编译产物..."
+    # Check build artifacts
+    - Write-Host "Checking build artifacts..."
     - |
       $exeFiles = Get-ChildItem -Path "target\release\" -Filter "*.exe" -File
       if ($exeFiles.Count -gt 0) {
-        Write-Host "✅ 找到可执行文件:"
+        Write-Host "Found executable files:"
         foreach ($file in $exeFiles) {
           Write-Host "  - $($file.Name) ($([math]::Round($file.Length/1MB, 2)) MB)"
         }
       } else {
-        Write-Host "❌ 未找到可执行文件"
+        Write-Host "No executable files found"
         Get-ChildItem -Path "target\release\" -File | Format-Table Name, Length
       }
     
-    # 整理发布文件
-    - echo "📦 整理发布文件..."
+    # Organize release files
+    - Write-Host "Organizing release files..."
     - cd ..
     - New-Item -ItemType Directory -Path "release-windows" -Force
     - |
@@ -304,16 +288,16 @@ build-windows-native:
       if ($sourceFiles.Count -gt 0) {
         foreach ($file in $sourceFiles) {
           Copy-Item $file.FullName -Destination "release-windows\" -Force
-          Write-Host "✅ 复制: $($file.Name)"
+          Write-Host "Copied: $($file.Name)"
         }
       } else {
-        Write-Host "❌ 没有找到可执行文件进行复制"
+        Write-Host "No executable files found to copy"
       }
     
-    # 显示最终结果
-    - echo "📋 最终发布文件:"
+    # Display final results
+    - Write-Host "Final release files:"
     - Get-ChildItem -Path "release-windows" -File | Format-Table Name, Length, LastWriteTime
-    - echo "🎉 Windows 原生编译完成！"
+    - Write-Host "Windows native compilation completed!"
     
   artifacts:
     name: "windows-native-$CI_COMMIT_SHORT_SHA"
@@ -322,7 +306,6 @@ build-windows-native:
     expire_in: 30 days
     when: always
     reports:
-      # 生成编译报告
       junit: []
     
   only:
@@ -332,39 +315,35 @@ build-windows-native:
     - tags
     
   tags:
-    - windows  # 确保使用 Windows Runner
+    - windows
     
-  # 超时设置（全新系统首次安装可能需要较长时间）
   timeout: 2h
-  
-  # 允许失败，方便调试
   allow_failure: true
 
-# 快速测试作业（适用于已安装开发环境的 Runner）
+# Quick test job for pre-configured environments
 build-windows-quick:
   stage: build
   variables:
-    # 这个作业假设环境已配置，可以正常克隆代码
     GIT_STRATEGY: fetch
   
   before_script:
-    - echo "🔍 快速环境检查..."
+    - Write-Host "Quick environment check..."
     - node --version
     - npm --version
     - cargo --version
     
   script:
-    - echo "📦 安装依赖..."
+    - Write-Host "Installing dependencies..."
     - npm ci
     
-    - echo "🔨 构建前端..."
+    - Write-Host "Building frontend..."
     - npm run build
     
-    - echo "🚀 编译应用..."
+    - Write-Host "Compiling application..."
     - cd src-tauri
     - cargo build --release
     
-    - echo "📦 整理文件..."
+    - Write-Host "Organizing files..."
     - cd ..
     - New-Item -ItemType Directory -Path "release-quick" -Force
     - Copy-Item "src-tauri\target\release\*.exe" "release-quick\" -ErrorAction SilentlyContinue
@@ -377,11 +356,10 @@ build-windows-quick:
     expire_in: 7 days
     
   only:
-    - develop  # 仅在开发分支使用快速模式
+    - develop
     
   tags:
     - windows
     
-  when: manual  # 手动触发
-
+  when: manual 
  
