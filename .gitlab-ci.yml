@@ -9,6 +9,8 @@ variables:
   RUST_BACKTRACE: "1"
   # PowerShell 执行策略
   POWERSHELL_TELEMETRY_OPTOUT: 1
+  # 跳过自动 Git 克隆（因为 Git 可能未安装）
+  GIT_STRATEGY: none
 
 # 缓存配置
 cache:
@@ -31,9 +33,20 @@ build-windows-native:
     - |
       if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
         Write-Host "安装 Chocolatey..."
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        refreshenv
+        try {
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          refreshenv
+          Write-Host "✅ Chocolatey 安装完成"
+        } catch {
+          Write-Host "❌ Chocolatey 安装失败: $($_.Exception.Message)"
+          Write-Host "尝试备用安装方法..."
+          # 备用方法：下载到本地再执行
+          $chocoScript = "$env:TEMP\install-chocolatey.ps1"
+          Invoke-WebRequest -Uri 'https://community.chocolatey.org/install.ps1' -OutFile $chocoScript -UseBasicParsing
+          & $chocoScript
+          Remove-Item $chocoScript
+        }
       } else {
         Write-Host "✅ Chocolatey 已安装"
       }
@@ -43,10 +56,52 @@ build-windows-native:
     - |
       if (!(Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Host "安装 Git..."
-        choco install git -y
-        refreshenv
+        try {
+          choco install git -y --no-progress
+          refreshenv
+          # 手动添加 Git 到 PATH
+          $env:PATH += ";C:\Program Files\Git\bin;C:\Program Files\Git\cmd"
+          Write-Host "✅ Git 安装完成"
+        } catch {
+          Write-Host "❌ Git 安装失败，尝试直接下载..."
+          # 备用方法：直接下载 Git 便携版
+          $gitUrl = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/PortableGit-2.47.1-64-bit.7z.exe"
+          $gitPath = "$env:TEMP\git-portable.exe"
+          $gitDir = "C:\tools\git"
+          
+          Invoke-WebRequest -Uri $gitUrl -OutFile $gitPath -UseBasicParsing
+          New-Item -ItemType Directory -Path $gitDir -Force
+          Start-Process -FilePath $gitPath -ArgumentList "-o$gitDir", "-y" -Wait -NoNewWindow
+          Remove-Item $gitPath
+          
+          $env:PATH += ";$gitDir\bin;$gitDir\cmd"
+        }
       } else {
         Write-Host "✅ Git 已安装: $(git --version)"
+      }
+    
+    # 手动克隆代码仓库（因为我们跳过了自动克隆）
+    - echo "📁 手动克隆代码仓库..."
+    - |
+      $projectPath = $PWD.Path
+      Write-Host "当前工作目录: $projectPath"
+      
+      # 检查是否已有代码
+      if (Test-Path ".git") {
+        Write-Host "✅ 代码仓库已存在"
+      } else {
+        Write-Host "克隆代码仓库..."
+        try {
+          git clone $env:CI_REPOSITORY_URL .
+          git checkout $env:CI_COMMIT_SHA
+          Write-Host "✅ 代码克隆完成"
+        } catch {
+          Write-Host "❌ Git 克隆失败: $($_.Exception.Message)"
+          Write-Host "尝试使用 HTTP 方式..."
+          $httpUrl = $env:CI_REPOSITORY_URL -replace 'git@([^:]+):', 'https://$1/'
+          git clone $httpUrl .
+          git checkout $env:CI_COMMIT_SHA
+        }
       }
     
     # 安装 Node.js 22.16.0
@@ -54,16 +109,31 @@ build-windows-native:
     - |
       if (!(Get-Command node -ErrorAction SilentlyContinue)) {
         Write-Host "安装 Node.js 22.16.0..."
-        choco install nodejs --version=22.16.0 -y --force
-        refreshenv
-        # 手动添加到 PATH（防止环境变量问题）
-        $env:PATH += ";C:\Program Files\nodejs"
+        try {
+          choco install nodejs --version=22.16.0 -y --force --no-progress
+          refreshenv
+          # 手动添加到 PATH（防止环境变量问题）
+          $env:PATH += ";C:\Program Files\nodejs"
+          Write-Host "✅ Node.js 安装完成"
+        } catch {
+          Write-Host "❌ Node.js 安装失败，尝试直接下载..."
+          # 备用方法：直接下载 Node.js
+          $nodeUrl = "https://nodejs.org/dist/v22.16.0/node-v22.16.0-win-x64.zip"
+          $nodePath = "$env:TEMP\node.zip"
+          $nodeDir = "C:\tools\nodejs"
+          
+          Invoke-WebRequest -Uri $nodeUrl -OutFile $nodePath -UseBasicParsing
+          Expand-Archive $nodePath $nodeDir -Force
+          Remove-Item $nodePath
+          
+          $env:PATH += ";$nodeDir\node-v22.16.0-win-x64"
+        }
       } else {
         $nodeVersion = node --version
         Write-Host "✅ Node.js 已安装: $nodeVersion"
         if ($nodeVersion -notlike "v22.16.*") {
           Write-Host "升级到 Node.js 22.16.0..."
-          choco upgrade nodejs --version=22.16.0 -y --force
+          choco upgrade nodejs --version=22.16.0 -y --force --no-progress
           refreshenv
         }
       }
@@ -73,33 +143,71 @@ build-windows-native:
     - |
       if (!(Get-Command cargo -ErrorAction SilentlyContinue)) {
         Write-Host "安装 Rust..."
-        # 下载 Rust 安装器
-        $rustupUrl = "https://win.rustup.rs/x86_64"
-        $rustupPath = "$env:TEMP\rustup-init.exe"
-        Invoke-WebRequest -Uri $rustupUrl -OutFile $rustupPath -UseBasicParsing
-        
-        # 静默安装 Rust
-        Start-Process -FilePath $rustupPath -ArgumentList "-y", "--default-toolchain", "stable" -Wait -NoNewWindow
-        Remove-Item $rustupPath
-        
-        # 手动添加 Cargo 到 PATH
-        $env:PATH += ";$env:USERPROFILE\.cargo\bin"
-        
-        # 刷新环境变量
-        $env:CARGO_HOME = "$env:USERPROFILE\.cargo"
-        $env:RUSTUP_HOME = "$env:USERPROFILE\.rustup"
+        try {
+          # 下载 Rust 安装器
+          $rustupUrl = "https://win.rustup.rs/x86_64"
+          $rustupPath = "$env:TEMP\rustup-init.exe"
+          Invoke-WebRequest -Uri $rustupUrl -OutFile $rustupPath -UseBasicParsing
+          
+          # 静默安装 Rust
+          Start-Process -FilePath $rustupPath -ArgumentList "-y", "--default-toolchain", "stable" -Wait -NoNewWindow
+          Remove-Item $rustupPath
+          
+          # 手动添加 Cargo 到 PATH
+          $env:PATH += ";$env:USERPROFILE\.cargo\bin"
+          
+          # 刷新环境变量
+          $env:CARGO_HOME = "$env:USERPROFILE\.cargo"
+          $env:RUSTUP_HOME = "$env:USERPROFILE\.rustup"
+          Write-Host "✅ Rust 安装完成"
+        } catch {
+          Write-Host "❌ Rust 安装失败: $($_.Exception.Message)"
+          exit 1
+        }
       } else {
         Write-Host "✅ Rust 已安装: $(cargo --version)"
       }
     
-    # 安装 Visual Studio Build Tools（Rust 在 Windows 上需要）
+    # 安装 Visual Studio Build Tools（改为离线安装方式）
     - echo "🔧 安装 Visual Studio Build Tools..."
     - |
       if (!(Get-Command cl -ErrorAction SilentlyContinue)) {
         Write-Host "安装 Visual Studio Build Tools 2022..."
-        choco install visualstudio2022buildtools -y
-        choco install visualstudio2022-workload-vctools -y
-        refreshenv
+        try {
+          # 方法1：使用 Chocolatey
+          Write-Host "尝试使用 Chocolatey 安装..."
+          choco install visualstudio2022buildtools -y --no-progress --timeout=3600
+          choco install visualstudio2022-workload-vctools -y --no-progress --timeout=3600
+          refreshenv
+          Write-Host "✅ Visual Studio Build Tools 安装完成"
+        } catch {
+          Write-Host "❌ Chocolatey 安装失败，尝试直接下载安装器..."
+          # 方法2：直接下载官方安装器
+          $vsUrl = "https://aka.ms/vs/17/release/vs_buildtools.exe"
+          $vsPath = "$env:TEMP\vs_buildtools.exe"
+          
+          Write-Host "下载 Visual Studio Build Tools 安装器..."
+          Invoke-WebRequest -Uri $vsUrl -OutFile $vsPath -UseBasicParsing
+          
+          Write-Host "安装 Visual Studio Build Tools（离线模式）..."
+          $arguments = @(
+            "--quiet"
+            "--wait"
+            "--add", "Microsoft.VisualStudio.Workload.VCTools"
+            "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+            "--add", "Microsoft.VisualStudio.Component.Windows11SDK.22621"
+            "--includeRecommended"
+            "--nocache"
+          )
+          Start-Process -FilePath $vsPath -ArgumentList $arguments -Wait -NoNewWindow
+          Remove-Item $vsPath
+          
+          # 添加 MSVC 到环境变量
+          $vctools = Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\" | Sort-Object Name -Descending | Select-Object -First 1
+          if ($vctools) {
+            $env:PATH += ";$($vctools.FullName)\bin\Hostx64\x64"
+          }
+        }
       } else {
         Write-Host "✅ Visual Studio Build Tools 已安装"
       }
@@ -108,12 +216,14 @@ build-windows-native:
     - echo "🔍 验证开发环境..."
     - |
       Write-Host "=== 环境检查 ==="
+      $allGood = $true
+      
       try {
         $nodeVer = node --version
         Write-Host "✅ Node.js: $nodeVer"
       } catch {
         Write-Host "❌ Node.js 未正确安装"
-        exit 1
+        $allGood = $false
       }
       
       try {
@@ -121,7 +231,7 @@ build-windows-native:
         Write-Host "✅ npm: $npmVer"
       } catch {
         Write-Host "❌ npm 未正确安装"
-        exit 1
+        $allGood = $false
       }
       
       try {
@@ -129,7 +239,7 @@ build-windows-native:
         Write-Host "✅ Cargo: $cargoVer"
       } catch {
         Write-Host "❌ Rust/Cargo 未正确安装"
-        exit 1
+        $allGood = $false
       }
       
       try {
@@ -137,10 +247,14 @@ build-windows-native:
         Write-Host "✅ Rustc: $rustcVer"
       } catch {
         Write-Host "❌ Rustc 未正确安装"
-        exit 1
+        $allGood = $false
       }
       
-      Write-Host "🎉 所有工具安装完成！"
+      if ($allGood) {
+        Write-Host "🎉 所有工具安装完成！"
+      } else {
+        Write-Host "❌ 部分工具安装失败，但继续尝试构建..."
+      }
     
   script:
     # 设置 npm 镜像源（提高下载速度）
@@ -226,9 +340,13 @@ build-windows-native:
   # 允许失败，方便调试
   allow_failure: true
 
-# 快速测试作业（跳过工具安装，适用于已配置的环境）
+# 快速测试作业（适用于已安装开发环境的 Runner）
 build-windows-quick:
   stage: build
+  variables:
+    # 这个作业假设环境已配置，可以正常克隆代码
+    GIT_STRATEGY: fetch
+  
   before_script:
     - echo "🔍 快速环境检查..."
     - node --version
