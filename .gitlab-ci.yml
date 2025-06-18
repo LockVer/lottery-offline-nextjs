@@ -1,5 +1,5 @@
-# Docker 交叉编译 Windows 版本
-# 仅需要 Linux Runner，使用 Docker 容器进行 Windows 交叉编译
+# GitLab CI/CD 配置 - Windows 原生编译
+# 适用于全新的 Windows 系统，自动安装所有必要工具
 
 stages:
   - build
@@ -7,7 +7,8 @@ stages:
 variables:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
-  DEBIAN_FRONTEND: noninteractive
+  # PowerShell 执行策略
+  POWERSHELL_TELEMETRY_OPTOUT: 1
 
 # 缓存配置
 cache:
@@ -15,290 +16,200 @@ cache:
   paths:
     - node_modules/
     - .cargo/
+    - C:\tools\
 
-# Docker 交叉编译 Windows 版本
-build-windows-docker:
-  stage: build
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
-  variables:
-    # 使用阿里云镜像源
-    MIRROR_URL: "http://mirrors.aliyun.com"
-    # Docker 配置
-    DOCKER_HOST: tcp://docker:2376
-    DOCKER_TLS_CERTDIR: "/certs"
-    DOCKER_TLS_VERIFY: 1
-    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
-  before_script:
-    # 安装基础工具
-    - apk add --no-cache curl wget bash
-    
-    # 等待 Docker 服务启动
-    - echo "⏳ 等待 Docker 服务启动..."
-    - until docker info >/dev/null 2>&1; do echo "等待 Docker..."; sleep 2; done
-    - echo "✅ Docker 服务已就绪"
-    - docker info
-    
-    # 构建自定义交叉编译镜像
-    - |
-      cat > Dockerfile.cross << 'EOF'
-      FROM ubuntu:22.04
-      
-      # 设置环境变量
-      ENV DEBIAN_FRONTEND=noninteractive
-      ENV RUSTUP_HOME=/usr/local/rustup
-      ENV CARGO_HOME=/usr/local/cargo
-      ENV PATH=/usr/local/cargo/bin:$PATH
-      
-      # 配置阿里云镜像源
-      RUN echo "deb http://mirrors.aliyun.com/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list && \
-          echo "deb http://mirrors.aliyun.com/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
-          echo "deb http://mirrors.aliyun.com/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list && \
-          echo "deb http://mirrors.aliyun.com/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
-      
-      # 安装系统依赖
-      RUN apt-get update && apt-get install -y \
-          curl wget build-essential \
-          pkg-config libssl-dev \
-          libgtk-3-dev libayatana-appindicator3-dev \
-          librsvg2-dev libwebkit2gtk-4.0-dev \
-          mingw-w64 gcc-mingw-w64 \
-          xz-utils ca-certificates && \
-          rm -rf /var/lib/apt/lists/*
-      
-      # 安装 Node.js 22.16.0
-      RUN wget -qO /tmp/node.tar.xz https://mirrors.aliyun.com/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz && \
-          tar -xJ -C /opt -f /tmp/node.tar.xz && \
-          ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/ && \
-          rm /tmp/node.tar.xz
-      
-      # 安装 Rust
-      RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
-          rustup target add x86_64-pc-windows-gnu
-      
-      # 配置 Cargo 交叉编译
-      RUN mkdir -p ~/.cargo && \
-          echo '[target.x86_64-pc-windows-gnu]' > ~/.cargo/config.toml && \
-          echo 'linker = "x86_64-w64-mingw32-gcc"' >> ~/.cargo/config.toml && \
-          echo 'ar = "x86_64-w64-mingw32-ar"' >> ~/.cargo/config.toml
-      
-      # 设置工作目录
-      WORKDIR /workspace
-      
-      # 设置 npm 镜像源
-      RUN npm config set registry https://registry.npmmirror.com
-      EOF
-    
-    # 构建交叉编译镜像
-    - echo "🔨 构建交叉编译 Docker 镜像..."
-    - docker build -t tauri-cross-compile -f Dockerfile.cross .
-    
-  script:
-    # 在 Docker 容器中执行交叉编译
-    - echo "🚀 开始 Docker 交叉编译..."
-    - |
-      docker run --rm \
-        -v $(pwd):/workspace \
-        -w /workspace \
-        tauri-cross-compile \
-        bash -c "
-          set -e
-          echo '🔍 环境检查:'
-          node --version
-          npm --version
-          rustc --version
-          cargo --version
-          
-          echo '📦 安装依赖...'
-          npm ci
-          
-          echo '🔨 构建前端...'
-          npm run build
-          
-          echo '🎯 Windows 交叉编译...'
-          cd src-tauri
-          
-          # 设置环境变量，跳过 GTK 依赖检查
-          export PKG_CONFIG_ALLOW_CROSS=1
-          export PKG_CONFIG_PATH=
-          export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
-          
-          # 交叉编译
-          cargo build --release --target x86_64-pc-windows-gnu --no-default-features
-          
-          echo '📋 检查编译产物:'
-          ls -la target/x86_64-pc-windows-gnu/release/
-          find target/x86_64-pc-windows-gnu/release/ -name '*.exe' -type f
-          
-          echo '📦 准备发布文件...'
-          mkdir -p ../release-docker/
-          cp target/x86_64-pc-windows-gnu/release/*.exe ../release-docker/ || echo '未找到 exe 文件'
-          
-          echo '✅ Docker 交叉编译完成!'
-        "
-    
-    # 检查最终产物
-    - echo "📋 最终产物检查:"
-    - ls -la release-docker/ || echo "产物目录不存在"
-    
-  artifacts:
-    name: "windows-docker-$CI_COMMIT_SHORT_SHA"
-    paths:
-      - release-docker/
-    expire_in: 30 days
-    when: always
-    
-  only:
-    - main
-    - develop
-    - merge_requests
-    - tags
-    
-  tags:
-    - linux
-    
-  # 允许失败，方便调试
-  allow_failure: true
-
-# 备选方案：简单 Linux 构建（用于测试）
-build-linux-fallback:
-  stage: build
-  image: ubuntu:22.04
-  variables:
-    MIRROR_URL: "http://mirrors.aliyun.com"
-  before_script:
-    # 配置镜像源
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
-    
-    # 安装依赖
-    - apt-get update
-    - apt-get install -y wget curl ca-certificates
-    - apt-get install -y build-essential pkg-config libssl-dev
-    - apt-get install -y libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.0-dev
-    
-    # 安装 Node.js
-    - wget -qO /tmp/node.tar.xz https://mirrors.aliyun.com/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz
-    - tar -xJ -C /opt -f /tmp/node.tar.xz && ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/
-    
-    # 安装 Rust
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-    - source ~/.cargo/env
-    
-  script:
-    # Linux 本地构建
-    - echo "🔨 Linux 本地构建（备选方案）..."
-    - npm config set registry https://registry.npmmirror.com
-    - npm ci
-    - npm run build
-    
-    # 构建 Linux 版本
-    - cd src-tauri
-    - source ~/.cargo/env
-    - cargo build --release
-    
-    # 整理产物
-    - mkdir -p ../release-linux/
-    - cp target/release/* ../release-linux/ 2>/dev/null || echo "复制产物"
-    - echo "✅ Linux 构建完成"
-    
-  artifacts:
-    name: "linux-fallback-$CI_COMMIT_SHORT_SHA"
-    paths:
-      - release-linux/
-    expire_in: 7 days
-    when: always
-    
-  only:
-    - develop  # 仅在开发分支运行备选方案
-    
-  tags:
-    - linux
-    
-  when: manual  # 手动触发 
-
-# GitLab CI/CD 配置 - Windows Docker 原生编译
-
-stages:
-  - build
-
-variables:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: "1"
-
-# 缓存配置
-cache:
-  key: "$CI_COMMIT_REF_NAME"
-  paths:
-    - node_modules/
-    - .cargo/
-
-# Windows Docker 原生编译
+# Windows 原生编译 - 全新系统自动配置
 build-windows-native:
   stage: build
-  image: mcr.microsoft.com/windows/servercore:ltsc2022
-  variables:
-    # PowerShell 执行策略
-    POWERSHELL_TELEMETRY_OPTOUT: 1
   before_script:
-    # 安装 Chocolatey 包管理器
-    - |
-      Set-ExecutionPolicy Bypass -Scope Process -Force
-      [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-      iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    # 设置 PowerShell 执行策略
+    - Set-ExecutionPolicy Bypass -Scope Process -Force
+    - echo "🚀 开始配置全新 Windows 编译环境..."
     
-    # 安装 Node.js
-    - choco install nodejs --version=22.16.0 -y
-    - refreshenv
+    # 检查并安装 Chocolatey 包管理器
+    - echo "📦 安装 Chocolatey 包管理器..."
+    - |
+      if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
+        Write-Host "安装 Chocolatey..."
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        refreshenv
+      } else {
+        Write-Host "✅ Chocolatey 已安装"
+      }
+    
+    # 安装 Git（如果没有的话）
+    - echo "🔧 检查并安装 Git..."
+    - |
+      if (!(Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Host "安装 Git..."
+        choco install git -y
+        refreshenv
+      } else {
+        Write-Host "✅ Git 已安装: $(git --version)"
+      }
+    
+    # 安装 Node.js 22.16.0
+    - echo "📦 安装 Node.js 22.16.0..."
+    - |
+      if (!(Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Host "安装 Node.js 22.16.0..."
+        choco install nodejs --version=22.16.0 -y --force
+        refreshenv
+        # 手动添加到 PATH（防止环境变量问题）
+        $env:PATH += ";C:\Program Files\nodejs"
+      } else {
+        $nodeVersion = node --version
+        Write-Host "✅ Node.js 已安装: $nodeVersion"
+        if ($nodeVersion -notlike "v22.16.*") {
+          Write-Host "升级到 Node.js 22.16.0..."
+          choco upgrade nodejs --version=22.16.0 -y --force
+          refreshenv
+        }
+      }
     
     # 安装 Rust
+    - echo "🦀 安装 Rust..."
     - |
-      Invoke-WebRequest -Uri "https://win.rustup.rs/" -OutFile "rustup-init.exe" -UseBasicParsing
-      .\rustup-init.exe -y --default-toolchain stable
-      Remove-Item .\rustup-init.exe
+      if (!(Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Host "安装 Rust..."
+        # 下载 Rust 安装器
+        $rustupUrl = "https://win.rustup.rs/x86_64"
+        $rustupPath = "$env:TEMP\rustup-init.exe"
+        Invoke-WebRequest -Uri $rustupUrl -OutFile $rustupPath -UseBasicParsing
+        
+        # 静默安装 Rust
+        Start-Process -FilePath $rustupPath -ArgumentList "-y", "--default-toolchain", "stable" -Wait -NoNewWindow
+        Remove-Item $rustupPath
+        
+        # 手动添加 Cargo 到 PATH
+        $env:PATH += ";$env:USERPROFILE\.cargo\bin"
+        
+        # 刷新环境变量
+        $env:CARGO_HOME = "$env:USERPROFILE\.cargo"
+        $env:RUSTUP_HOME = "$env:USERPROFILE\.rustup"
+      } else {
+        Write-Host "✅ Rust 已安装: $(cargo --version)"
+      }
     
-    # 刷新环境变量
-    - $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+    # 安装 Visual Studio Build Tools（Rust 在 Windows 上需要）
+    - echo "🔧 安装 Visual Studio Build Tools..."
+    - |
+      if (!(Get-Command cl -ErrorAction SilentlyContinue)) {
+        Write-Host "安装 Visual Studio Build Tools 2022..."
+        choco install visualstudio2022buildtools -y
+        choco install visualstudio2022-workload-vctools -y
+        refreshenv
+      } else {
+        Write-Host "✅ Visual Studio Build Tools 已安装"
+      }
     
-    # 验证安装
-    - node --version
-    - npm --version
-    - cargo --version
+    # 验证所有工具安装
+    - echo "🔍 验证开发环境..."
+    - |
+      Write-Host "=== 环境检查 ==="
+      try {
+        $nodeVer = node --version
+        Write-Host "✅ Node.js: $nodeVer"
+      } catch {
+        Write-Host "❌ Node.js 未正确安装"
+        exit 1
+      }
+      
+      try {
+        $npmVer = npm --version
+        Write-Host "✅ npm: $npmVer"
+      } catch {
+        Write-Host "❌ npm 未正确安装"
+        exit 1
+      }
+      
+      try {
+        $cargoVer = cargo --version
+        Write-Host "✅ Cargo: $cargoVer"
+      } catch {
+        Write-Host "❌ Rust/Cargo 未正确安装"
+        exit 1
+      }
+      
+      try {
+        $rustcVer = rustc --version
+        Write-Host "✅ Rustc: $rustcVer"
+      } catch {
+        Write-Host "❌ Rustc 未正确安装"
+        exit 1
+      }
+      
+      Write-Host "🎉 所有工具安装完成！"
     
   script:
-    # 安装依赖
-    - echo "📦 安装 Node.js 依赖..."
+    # 设置 npm 镜像源（提高下载速度）
+    - echo "⚙️ 配置 npm 镜像源..."
+    - npm config set registry https://registry.npmmirror.com
+    
+    # 安装项目依赖
+    - echo "📦 安装项目依赖..."
     - npm ci
     
     # 构建前端
     - echo "🔨 构建前端..."
     - npm run build
     
-    # 编译 Windows 版本
-    - echo "🚀 开始 Windows 原生编译..."
+    # 编译 Tauri 应用
+    - echo "🚀 开始编译 Tauri 应用..."
     - cd src-tauri
+    
+    # 确保 Rust 环境变量正确
+    - $env:CARGO_HOME = "$env:USERPROFILE\.cargo"
+    - $env:RUSTUP_HOME = "$env:USERPROFILE\.rustup"
+    - $env:PATH += ";$env:USERPROFILE\.cargo\bin"
+    
+    # 编译 Release 版本
     - cargo build --release
     
     # 检查编译产物
     - echo "📋 检查编译产物..."
-    - Get-ChildItem -Path "target\release\" -Name "*.exe"
+    - |
+      $exeFiles = Get-ChildItem -Path "target\release\" -Filter "*.exe" -File
+      if ($exeFiles.Count -gt 0) {
+        Write-Host "✅ 找到可执行文件:"
+        foreach ($file in $exeFiles) {
+          Write-Host "  - $($file.Name) ($([math]::Round($file.Length/1MB, 2)) MB)"
+        }
+      } else {
+        Write-Host "❌ 未找到可执行文件"
+        Get-ChildItem -Path "target\release\" -File | Format-Table Name, Length
+      }
     
-    # 整理产物
-    - echo "📦 整理编译产物..."
-    - New-Item -ItemType Directory -Path "..\release-windows-native" -Force
-    - Copy-Item "target\release\*.exe" "..\release-windows-native\" -ErrorAction SilentlyContinue
-    - Get-ChildItem "..\release-windows-native\"
-    - echo "✅ Windows 原生编译完成！"
+    # 整理发布文件
+    - echo "📦 整理发布文件..."
+    - cd ..
+    - New-Item -ItemType Directory -Path "release-windows" -Force
+    - |
+      $sourceFiles = Get-ChildItem -Path "src-tauri\target\release\" -Filter "*.exe" -File
+      if ($sourceFiles.Count -gt 0) {
+        foreach ($file in $sourceFiles) {
+          Copy-Item $file.FullName -Destination "release-windows\" -Force
+          Write-Host "✅ 复制: $($file.Name)"
+        }
+      } else {
+        Write-Host "❌ 没有找到可执行文件进行复制"
+      }
+    
+    # 显示最终结果
+    - echo "📋 最终发布文件:"
+    - Get-ChildItem -Path "release-windows" -File | Format-Table Name, Length, LastWriteTime
+    - echo "🎉 Windows 原生编译完成！"
     
   artifacts:
     name: "windows-native-$CI_COMMIT_SHORT_SHA"
     paths:
-      - release-windows-native/
+      - release-windows/
     expire_in: 30 days
     when: always
+    reports:
+      # 生成编译报告
+      junit: []
     
   only:
     - main
@@ -307,137 +218,52 @@ build-windows-native:
     - tags
     
   tags:
-    - windows  # 需要 Windows Runner
+    - windows  # 确保使用 Windows Runner
     
+  # 超时设置（全新系统首次安装可能需要较长时间）
+  timeout: 2h
+  
   # 允许失败，方便调试
   allow_failure: true
 
-# 备选方案：使用 Windows Server Core 2019
-build-windows-2019:
+# 快速测试作业（跳过工具安装，适用于已配置的环境）
+build-windows-quick:
   stage: build
-  image: mcr.microsoft.com/windows/servercore:ltsc2019
-  variables:
-    POWERSHELL_TELEMETRY_OPTOUT: 1
   before_script:
-    # 使用更兼容的安装方式
-    - |
-      # 安装 Chocolatey
-      Set-ExecutionPolicy Bypass -Scope Process -Force
-      [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-      iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
-    
-    # 安装工具
-    - choco install nodejs --version=22.16.0 -y --force
-    - choco install git -y
-    - refreshenv
-    
-    # 安装 Rust (使用官方安装器)
-    - |
-      $rustupUrl = "https://win.rustup.rs/x86_64"
-      Invoke-WebRequest -Uri $rustupUrl -OutFile "rustup-init.exe"
-      Start-Process -FilePath ".\rustup-init.exe" -ArgumentList "-y" -Wait
-      Remove-Item ".\rustup-init.exe"
-    
-    # 添加 Cargo 到 PATH
-    - $env:PATH += ";$env:USERPROFILE\.cargo\bin"
-    
-  script:
-    # 环境检查
-    - echo "🔍 环境检查："
+    - echo "🔍 快速环境检查..."
     - node --version
     - npm --version
     - cargo --version
     
-    # 构建项目
+  script:
     - echo "📦 安装依赖..."
-    - npm install
+    - npm ci
     
     - echo "🔨 构建前端..."
     - npm run build
     
-    - echo "🚀 编译 Tauri 应用..."
+    - echo "🚀 编译应用..."
     - cd src-tauri
     - cargo build --release
     
-    # 整理文件
-    - echo "📦 准备发布文件..."
-    - mkdir ..\release-2019 -ErrorAction SilentlyContinue
-    - copy target\release\*.exe ..\release-2019\ -ErrorAction SilentlyContinue
-    - dir ..\release-2019\
+    - echo "📦 整理文件..."
+    - cd ..
+    - New-Item -ItemType Directory -Path "release-quick" -Force
+    - Copy-Item "src-tauri\target\release\*.exe" "release-quick\" -ErrorAction SilentlyContinue
+    - Get-ChildItem "release-quick"
     
   artifacts:
-    name: "windows-2019-$CI_COMMIT_SHORT_SHA"
+    name: "windows-quick-$CI_COMMIT_SHORT_SHA"
     paths:
-      - release-2019/
-    expire_in: 30 days
-    when: always
+      - release-quick/
+    expire_in: 7 days
     
   only:
-    - develop  # 仅在开发分支测试
+    - develop  # 仅在开发分支使用快速模式
     
   tags:
     - windows
     
   when: manual  # 手动触发
 
-# Linux 交叉编译备选方案（如果没有 Windows Runner）
-build-linux-cross:
-  stage: build
-  image: ubuntu:22.04
-  variables:
-    MIRROR_URL: "http://mirrors.aliyun.com"
-  before_script:
-    # 配置镜像源
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list
-    - echo "deb ${MIRROR_URL}/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list
-    
-    # 安装依赖 - 只安装编译必需的，跳过 GTK
-    - apt-get update
-    - apt-get install -y wget curl ca-certificates build-essential pkg-config libssl-dev mingw-w64 xz-utils
-    
-    # 安装 Node.js
-    - wget -qO /tmp/node.tar.xz https://mirrors.aliyun.com/nodejs-release/v22.16.0/node-v22.16.0-linux-x64.tar.xz
-    - tar -xJ -C /opt -f /tmp/node.tar.xz && ln -sf /opt/node-v22.16.0-linux-x64/bin/* /usr/local/bin/
-    
-    # 安装 Rust
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-    - source ~/.cargo/env
-    - rustup target add x86_64-pc-windows-gnu
-    
-    # 配置交叉编译
-    - mkdir -p ~/.cargo
-    - echo '[target.x86_64-pc-windows-gnu]' > ~/.cargo/config.toml
-    - echo 'linker = "x86_64-w64-mingw32-gcc"' >> ~/.cargo/config.toml
-    
-  script:
-    - echo "⚠️  注意：这是备选的 Linux 交叉编译方案"
-    - npm config set registry https://registry.npmmirror.com
-    - npm ci
-    - npm run build
-    
-    # 尝试无 GUI 编译
-    - cd src-tauri
-    - source ~/.cargo/env
-    - echo "🎯 尝试无默认特性编译..."
-    - cargo build --release --target x86_64-pc-windows-gnu --no-default-features || echo "交叉编译失败"
-    
-    # 整理产物
-    - mkdir -p ../release-cross-backup/
-    - find target/ -name "*.exe" -exec cp {} ../release-cross-backup/ \; || echo "未找到 exe 文件"
-    
-  artifacts:
-    name: "linux-cross-backup-$CI_COMMIT_SHORT_SHA"
-    paths:
-      - release-cross-backup/
-    expire_in: 7 days
-    when: always
-    
-  only:
-    - develop
-    
-  tags:
-    - linux
-    
-  when: manual  # 仅作为备选方案 
+ 
