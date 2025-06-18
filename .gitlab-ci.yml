@@ -411,8 +411,7 @@ build-windows-native:
           Write-Host "Creating minimal Rust project..."
           
           # Create minimal Cargo.toml
-          $cargoToml = @"
-[package]
+          $cargoToml = '[package]
 name = "lottery-offline"
 version = "1.0.0"
 edition = "2021"
@@ -421,18 +420,15 @@ edition = "2021"
 
 [[bin]]
 name = "lottery-offline"
-path = "src/main.rs"
-"@
+path = "src/main.rs"'
           $cargoToml | Out-File -FilePath "Cargo.toml" -Encoding UTF8
           
           # Create src directory and main.rs
           New-Item -ItemType Directory -Path "src" -Force
-          $mainRs = @"
-fn main() {
+          $mainRs = 'fn main() {
     println!("Hello from Lottery Offline!");
     println!("This is a minimal build for CI/CD testing.");
-}
-"@
+}'
           $mainRs | Out-File -FilePath "src\main.rs" -Encoding UTF8
           
           Write-Host "Created minimal Rust project, compiling..."
@@ -459,8 +455,7 @@ fn main() {
         cd src-tauri
         
         # Create minimal project as above
-        $cargoToml = @"
-[package]
+        $cargoToml = '[package]
 name = "lottery-offline"
 version = "1.0.0"
 edition = "2021"
@@ -469,16 +464,13 @@ edition = "2021"
 
 [[bin]]
 name = "lottery-offline"
-path = "src/main.rs"
-"@
+path = "src/main.rs"'
         $cargoToml | Out-File -FilePath "Cargo.toml" -Encoding UTF8
         
-        $mainRs = @"
-fn main() {
+        $mainRs = 'fn main() {
     println!("Hello from Lottery Offline!");
     println!("This is a minimal build for CI/CD testing.");
-}
-"@
+}'
         $mainRs | Out-File -FilePath "src\main.rs" -Encoding UTF8
         
         Write-Host "Created minimal Rust project, compiling..."
@@ -574,5 +566,4 @@ build-windows-quick:
   tags:
     - windows
     
-  when: manual 
- 
+  when: manual
